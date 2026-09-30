@@ -21,6 +21,7 @@ func (s *Service) RequestCommand(
 		return domain.GateCommand{}, domain.Internal("command_id_generation_failed", "command id could not be generated")
 	}
 
+	now := s.now()
 	command, err := domain.NewGateCommand(
 		commandID,
 		gate.ID,
@@ -29,12 +30,12 @@ func (s *Service) RequestCommand(
 		gate.MaxAperture,
 		request.Reason,
 		request.RequestedBy,
-		s.now(),
+		now,
 	)
 	if err != nil {
 		return domain.GateCommand{}, err
 	}
-	if err := s.repository.CreateCommand(ctx, command); err != nil {
+	if err := s.repository.CreateCommand(ctx, command, now); err != nil {
 		return domain.GateCommand{}, err
 	}
 	return command, nil
@@ -59,18 +60,14 @@ func (s *Service) ReviewInterlock(
 		return domain.GateCommand{}, domain.Gate{}, err
 	}
 
-	token := ""
-	if decision.IsClear() {
-		token, err = s.newToken()
-		if err != nil {
-			return domain.GateCommand{}, domain.Gate{}, domain.Internal(
-				"execution_token_generation_failed",
-				"execution token could not be generated",
-			)
-		}
+	// The token is minted by the repository inside the reservation critical
+	// section and only after window admission succeeds, so a rejected review
+	// never issues a credential that could later be presented for execution.
+	issueToken := func() (string, error) {
+		return s.newToken()
 	}
 
-	return s.repository.ReviewCommand(ctx, commandID, decision, token, s.now())
+	return s.repository.ReviewCommand(ctx, commandID, decision, issueToken, s.now())
 }
 
 func (s *Service) ExecuteCommand(

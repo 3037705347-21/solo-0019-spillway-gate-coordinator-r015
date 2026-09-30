@@ -12,7 +12,7 @@ func formatTime(value time.Time) string {
 }
 
 func gateView(gate domain.Gate) contracts.GateView {
-	return contracts.GateView{
+	view := contracts.GateView{
 		ID:              gate.ID,
 		Name:            gate.Name,
 		Status:          string(gate.Status),
@@ -22,6 +22,11 @@ func gateView(gate domain.Gate) contracts.GateView {
 		UpdatedAt:       formatTime(gate.UpdatedAt),
 		Version:         gate.Version,
 	}
+	if gate.AdjustmentWindow.Enabled() {
+		view.AdjustmentWindowSeconds = int64(gate.AdjustmentWindow.Duration / time.Second)
+		view.AdjustmentWindowMaxTravel = gate.AdjustmentWindow.MaxAdjustment
+	}
+	return view
 }
 
 func commandView(command domain.GateCommand, includeToken bool) contracts.CommandView {
@@ -39,6 +44,9 @@ func commandView(command domain.GateCommand, includeToken bool) contracts.Comman
 		UpdatedAt:        formatTime(command.UpdatedAt),
 		Version:          command.Version,
 	}
+	if !command.CompletedAt.IsZero() {
+		view.CompletedAt = formatTime(command.CompletedAt)
+	}
 
 	if includeToken && command.Status == domain.CommandApproved {
 		view.ExecutionToken = command.ExecutionToken
@@ -49,6 +57,32 @@ func commandView(command domain.GateCommand, includeToken bool) contracts.Comman
 			Verifier:   command.Interlock.Verifier,
 			Note:       command.Interlock.Note,
 			ReviewedAt: formatTime(command.Interlock.ReviewedAt),
+		}
+	}
+	return view
+}
+
+func adjustmentWindowView(status domain.AdjustmentWindowStatus) contracts.AdjustmentWindowView {
+	view := contracts.AdjustmentWindowView{
+		GateID:      status.GateID,
+		Enabled:     status.Window.Enabled(),
+		EvaluatedAt: formatTime(status.EvaluatedAt),
+		UsedTravel:  status.Used,
+		Facts:       []contracts.AdjustmentFactView{},
+	}
+	if status.Window.Enabled() {
+		view.WindowSeconds = int64(status.Window.Duration / time.Second)
+		view.MaxTravel = status.Window.MaxAdjustment
+		view.RemainingTravel = status.Headroom()
+		view.WindowStart = formatTime(status.WindowStart)
+		for _, fact := range status.Facts {
+			view.Facts = append(view.Facts, contracts.AdjustmentFactView{
+				CommandID:        fact.CommandID,
+				StartingAperture: fact.StartingAperture,
+				TargetAperture:   fact.TargetAperture,
+				ApertureDelta:    fact.ApertureDelta,
+				CompletedAt:      formatTime(fact.CompletedAt),
+			})
 		}
 	}
 	return view

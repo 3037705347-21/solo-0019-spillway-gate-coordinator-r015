@@ -30,6 +30,7 @@ type GateCommand struct {
 	TerminalReason   string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	CompletedAt      time.Time
 	Version          int64
 }
 
@@ -87,9 +88,22 @@ func NewGateCommand(
 	}, nil
 }
 
-func (c *GateCommand) Review(decision InterlockDecision, token string, now time.Time) error {
+// EnsureReviewable validates that the command is still pending without
+// mutating it. It lets the repository perform admission checks (for example
+// the adjustment window) before a credential is issued or any state changes.
+func (c *GateCommand) EnsureReviewable() error {
 	if c.Status != CommandPending {
 		return Conflict("command_not_pending", "only pending commands can be reviewed")
+	}
+	return nil
+}
+
+func (c *GateCommand) Review(decision InterlockDecision, token string, now time.Time) error {
+	if err := c.EnsureReviewable(); err != nil {
+		return err
+	}
+	if decision.IsClear() && strings.TrimSpace(token) == "" {
+		return Invalid("missing_execution_token", "clear decisions require an execution token")
 	}
 
 	decisionCopy := decision
@@ -98,10 +112,6 @@ func (c *GateCommand) Review(decision InterlockDecision, token string, now time.
 	c.Version++
 
 	if decision.IsClear() {
-		token = strings.TrimSpace(token)
-		if token == "" {
-			return Invalid("missing_execution_token", "clear decisions require an execution token")
-		}
 		c.ExecutionToken = token
 		c.Status = CommandApproved
 		return nil
@@ -135,9 +145,11 @@ func (c *GateCommand) Complete(now time.Time) error {
 		return Conflict("command_not_executing", "command is not executing")
 	}
 
+	completedAt := now.UTC()
 	c.ExecutionToken = ""
 	c.Status = CommandCompleted
-	c.UpdatedAt = now.UTC()
+	c.CompletedAt = completedAt
+	c.UpdatedAt = completedAt
 	c.Version++
 	return nil
 }

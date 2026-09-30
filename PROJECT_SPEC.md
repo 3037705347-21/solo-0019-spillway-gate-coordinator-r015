@@ -20,15 +20,15 @@
 
 ### register-gate
 
-运行协调员通过 `POST /gates` 登记闸门。服务校验标识、名称、最大开度和初始开度，写入空闲状态；重复标识返回稳定冲突错误，不覆盖原记录。
+运行协调员通过 `POST /gates` 登记闸门。服务校验标识、名称、最大开度和初始开度，写入空闲状态；重复标识返回稳定冲突错误，不覆盖原记录。可同时配置一个值班周期的滚动开度调整窗口（时长秒数与周期内累计调整上限），两项必须同时提供或同时缺省；缺省时不启用窗口限制。
 
 ### request-gate-command
 
-运行协调员通过 `POST /commands` 提交开度调整命令。服务读取闸门当前开度和限制，校验目标开度与申请信息，创建待复核命令并冻结起始开度。
+运行协调员通过 `POST /commands` 提交开度调整命令。服务读取闸门当前开度和限制，校验目标开度与申请信息，创建待复核命令并冻结起始开度。若闸门启用了调整窗口，命令的调整量（目标开度与冻结起始开度之差的绝对值）叠加窗口内已生效执行事实的累计调整量后超过安全上限，则返回稳定冲突 `adjustment_window_exceeded`，命令不会写入。
 
 ### review-safety-interlock
 
-安全复核员通过 `POST /commands/{id}/interlock` 提交复核结论。clear 结论会原子占用闸门并签发一次执行令牌；blocked 结论会把命令置为 rejected。其他命令先占用同一闸门时，当前 clear 结论返回冲突且不改变闸门。
+安全复核员通过 `POST /commands/{id}/interlock` 提交复核结论。clear 结论会原子占用闸门并签发一次执行令牌；blocked 结论会把命令置为 rejected。其他命令先占用同一闸门时，当前 clear 结论返回冲突且不改变闸门。对启用窗口的闸门，clear 结论在同一临界区内按已完成命令重新计算窗口：累计调整量会超限时，在占用落库和执行令牌签发之前以 `adjustment_window_exceeded` 拒绝，命令保持 pending、版本不变、闸门不被占用。
 
 ### execute-gate-command
 
@@ -45,6 +45,16 @@
 - 模拟故障会令命令 aborted、闸门 faulted，并保留最终开度。
 - 已完成或已中止的命令不能再次执行。
 
+## 开度调整窗口
+
+- 窗口按闸门配置：`adjustment_window_seconds` 为滚动值班周期时长，`adjustment_window_max_travel` 为周期内累计调整量安全上限；两者必须成对配置，缺省表示不启用。
+- 窗口用量只统计**已生效执行事实**：在窗口区间内（含起点）进入 `completed` 的命令，按其冻结起始开度与目标开度之差的绝对值累计；pending、approved、rejected、aborted 命令都不占用额度。
+- 合法边界为闭区间：已用调整量与本次调整量之和小于等于上限即放行，正好等于上限也合法。
+- 申请阶段与 clear 复核阶段都在仓库互斥锁内重新计算窗口；超限时返回稳定冲突码 `adjustment_window_exceeded`，被拒请求不落命令、不占用闸门、不签发执行令牌、不推进闸门或命令版本。
+- 执行令牌在所有复核检查（状态、占用、窗口）通过后才在临界区内签发，因此被拒路径不会产生任何凭据。
+- 已完成命令滚出窗口后真实释放额度，但命令历史仍可通过 `GET /commands/{id}` 查询；`completed_at` 标记其生效时刻。
+- `GET /gates/{id}/adjustment-window` 返回窗口是否启用、周期时长、上限、窗口起点、评估时刻、已用与剩余调整量以及构成用量的事实清单，保证合法边界、真实释放与历史可解释。
+
 ## 模块边界
 
 - `cmd/server`：进程入口、监听地址和退出控制。
@@ -60,6 +70,7 @@
 - `GET /health`
 - `POST /gates`
 - `GET /gates/{id}`
+- `GET /gates/{id}/adjustment-window`
 - `POST /commands`
 - `GET /commands/{id}`
 - `POST /commands/{id}/interlock`

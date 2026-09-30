@@ -16,21 +16,30 @@ go run ./cmd/server --addr 127.0.0.1:18119
 ```text
 POST /gates
 GET  /gates/{id}
+GET  /gates/{id}/adjustment-window
 POST /commands
 GET  /commands/{id}
 POST /commands/{id}/interlock
 POST /commands/{id}/execute
 ```
 
-登记闸门示例：
+登记闸门示例（可选配置一个值班周期内累计调整量不超过 3.0 的 600 秒滚动窗口）：
 
 ```json
 {
   "id": "gate-east",
   "name": "东侧泄洪闸",
   "max_aperture": 4.5,
-  "initial_aperture": 0.5
+  "initial_aperture": 0.5,
+  "adjustment_window_seconds": 600,
+  "adjustment_window_max_travel": 3.0
 }
+```
+
+窗口只统计窗口内已完成（completed）命令的行程 `|目标开度 − 起始开度|`；pending、rejected、aborted 不占额度。申请或 clear 复核时若 `已用 + 本次` 超过上限，返回 409 和稳定错误码 `adjustment_window_exceeded`，且不写入占用、不签令牌、不推进版本。窗口状态可查：
+
+```text
+GET /gates/{id}/adjustment-window
 ```
 
 提交命令示例：
@@ -82,6 +91,7 @@ go run ./cmd/workflowcheck --workflow register-gate
 go run ./cmd/workflowcheck --workflow request-gate-command
 go run ./cmd/workflowcheck --workflow review-safety-interlock
 go run ./cmd/workflowcheck --workflow execute-gate-command
+go run ./cmd/workflowcheck --workflow adjustment-window
 ```
 
 这些检查会创建临时 HTTP 服务并调用真实路由。它们不调用外部网络，也不依赖数据库。

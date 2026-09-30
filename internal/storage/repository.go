@@ -10,13 +10,18 @@ import (
 type Repository interface {
 	CreateGate(ctx context.Context, gate domain.Gate) error
 	Gate(ctx context.Context, id string) (domain.Gate, error)
-	CreateCommand(ctx context.Context, command domain.GateCommand) error
+	CreateCommand(ctx context.Context, command domain.GateCommand, now time.Time) error
 	Command(ctx context.Context, id string) (domain.GateCommand, error)
+	AdjustmentWindowStatus(
+		ctx context.Context,
+		gateID string,
+		now time.Time,
+	) (domain.AdjustmentWindowStatus, error)
 	ReviewCommand(
 		ctx context.Context,
 		commandID string,
 		decision domain.InterlockDecision,
-		token string,
+		issueToken func() (string, error),
 		now time.Time,
 	) (domain.GateCommand, domain.Gate, error)
 	ExecuteCommand(

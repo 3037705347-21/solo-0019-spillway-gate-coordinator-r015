@@ -18,17 +18,23 @@ const (
 var gateIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,31}$`)
 
 type Gate struct {
-	ID              string
-	Name            string
-	Status          GateStatus
-	Aperture        float64
-	MaxAperture     float64
-	ActiveCommandID string
-	UpdatedAt       time.Time
-	Version         int64
+	ID               string
+	Name             string
+	Status           GateStatus
+	Aperture         float64
+	MaxAperture      float64
+	ActiveCommandID  string
+	AdjustmentWindow AdjustmentWindow
+	UpdatedAt        time.Time
+	Version          int64
 }
 
-func NewGate(id, name string, maxAperture, initialAperture float64, now time.Time) (Gate, error) {
+func NewGate(
+	id, name string,
+	maxAperture, initialAperture float64,
+	window AdjustmentWindow,
+	now time.Time,
+) (Gate, error) {
 	id = strings.TrimSpace(id)
 	if !gateIDPattern.MatchString(id) {
 		return Gate{}, Invalid("invalid_gate_id", "gate id must use lowercase letters, digits, and hyphens")
@@ -46,13 +52,14 @@ func NewGate(id, name string, maxAperture, initialAperture float64, now time.Tim
 	}
 
 	return Gate{
-		ID:          id,
-		Name:        name,
-		Status:      GateIdle,
-		Aperture:    initialAperture,
-		MaxAperture: maxAperture,
-		UpdatedAt:   now.UTC(),
-		Version:     1,
+		ID:               id,
+		Name:             name,
+		Status:           GateIdle,
+		Aperture:         initialAperture,
+		MaxAperture:      maxAperture,
+		AdjustmentWindow: window,
+		UpdatedAt:        now.UTC(),
+		Version:          1,
 	}, nil
 }
 
