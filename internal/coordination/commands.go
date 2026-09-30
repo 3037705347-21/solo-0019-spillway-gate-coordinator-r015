@@ -34,7 +34,7 @@ func (s *Service) RequestCommand(
 	if err != nil {
 		return domain.GateCommand{}, err
 	}
-	if err := s.repository.CreateCommand(ctx, command); err != nil {
+	if err := s.repository.CreateCommand(ctx, command, s.now()); err != nil {
 		return domain.GateCommand{}, err
 	}
 	return command, nil

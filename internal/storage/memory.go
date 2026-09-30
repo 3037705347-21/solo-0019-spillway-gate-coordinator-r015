@@ -43,7 +43,7 @@ func (m *MemoryRepository) Gate(_ context.Context, id string) (domain.Gate, erro
 	return gate, nil
 }
 
-func (m *MemoryRepository) CreateCommand(_ context.Context, command domain.GateCommand) error {
+func (m *MemoryRepository) CreateCommand(_ context.Context, command domain.GateCommand, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -62,6 +62,19 @@ func (m *MemoryRepository) CreateCommand(_ context.Context, command domain.GateC
 	}
 	if _, exists := m.commands[command.ID]; exists {
 		return domain.Conflict("duplicate_command_id", "command id already exists")
+	}
+
+	// The cumulative window is evaluated under the write lock from committed
+	// execution facts only, so concurrent requests or reviews cannot both read
+	// a stale budget and over-admit.
+	facts := m.adjustmentFactsLocked(gate.ID)
+	if _, err := domain.CheckAdjustmentWindow(
+		gate,
+		facts,
+		domain.AdjustmentAmount(command.StartingAperture, command.TargetAperture),
+		now,
+	); err != nil {
+		return err
 	}
 
 	m.commands[command.ID] = command
@@ -99,6 +112,21 @@ func (m *MemoryRepository) ReviewCommand(
 	}
 
 	nextCommand := cloneCommand(command)
+	if decision.IsClear() {
+		// A clear review may only be admitted while the committed execution
+		// facts still leave room. The check runs before Review()/Reserve() so
+		// an over-window refusal leaves the command pending, keeps its version
+		// untouched, issues no token and never reserves the gate.
+		facts := m.adjustmentFactsLocked(gate.ID)
+		if _, err := domain.CheckAdjustmentWindow(
+			gate,
+			facts,
+			domain.AdjustmentAmount(nextCommand.StartingAperture, nextCommand.TargetAperture),
+			now,
+		); err != nil {
+			return domain.GateCommand{}, domain.Gate{}, err
+		}
+	}
 	if err := nextCommand.Review(decision, token, now); err != nil {
 		return domain.GateCommand{}, domain.Gate{}, err
 	}
@@ -173,4 +201,39 @@ func cloneCommand(command domain.GateCommand) domain.GateCommand {
 	decision := *command.Interlock
 	command.Interlock = &decision
 	return command
+}
+
+// adjustmentFactsLocked enumerates the effective execution facts of one gate.
+// Only completed commands have actually taken effect; aborted commands latch
+// the gate faulted and pending/approved/executing commands have not moved yet.
+func (m *MemoryRepository) adjustmentFactsLocked(gateID string) []domain.AdjustmentFact {
+	facts := make([]domain.AdjustmentFact, 0)
+	for _, command := range m.commands {
+		if command.GateID != gateID || command.Status != domain.CommandCompleted {
+			continue
+		}
+		facts = append(facts, domain.AdjustmentFact{
+			CommandID:   command.ID,
+			StartingAt:  command.StartingAperture,
+			Target:      command.TargetAperture,
+			Amount:      domain.AdjustmentAmount(command.StartingAperture, command.TargetAperture),
+			CompletedAt: command.CompletedAt,
+		})
+	}
+	return facts
+}
+
+func (m *MemoryRepository) AdjustmentWindow(
+	_ context.Context,
+	gateID string,
+	now time.Time,
+) (domain.AdjustmentWindow, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	gate, exists := m.gates[gateID]
+	if !exists {
+		return domain.AdjustmentWindow{}, domain.NotFound("gate_not_found", "gate id was not found")
+	}
+	return domain.BuildAdjustmentWindow(gate, m.adjustmentFactsLocked(gateID), now), nil
 }

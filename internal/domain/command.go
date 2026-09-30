@@ -30,6 +30,7 @@ type GateCommand struct {
 	TerminalReason   string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	CompletedAt      time.Time
 	Version          int64
 }
 
@@ -137,6 +138,7 @@ func (c *GateCommand) Complete(now time.Time) error {
 
 	c.ExecutionToken = ""
 	c.Status = CommandCompleted
+	c.CompletedAt = now.UTC()
 	c.UpdatedAt = now.UTC()
 	c.Version++
 	return nil
@@ -154,6 +156,7 @@ func (c *GateCommand) Abort(reason string, now time.Time) error {
 	c.ExecutionToken = ""
 	c.TerminalReason = reason
 	c.Status = CommandAborted
+	c.CompletedAt = now.UTC()
 	c.UpdatedAt = now.UTC()
 	c.Version++
 	return nil

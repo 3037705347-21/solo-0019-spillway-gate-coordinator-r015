@@ -12,23 +12,23 @@
 
 ## 核心实体
 
-- `gate`：闸门及其当前开度、运行状态、最大开度和活动命令。
-- `gate_command`：一次开度调整申请，包含目标开度、申请原因、状态和执行令牌。
+- `gate`：闸门及其当前开度、运行状态、最大开度、活动命令和值班周期累计调整窗口配置。
+- `gate_command`：一次开度调整申请，包含目标开度、申请原因、状态、完成时刻和执行令牌。
 - `interlock_decision`：安全复核结论，状态为 clear 或 blocked。
 
 ## 业务流程
 
 ### register-gate
 
-运行协调员通过 `POST /gates` 登记闸门。服务校验标识、名称、最大开度和初始开度，写入空闲状态；重复标识返回稳定冲突错误，不覆盖原记录。
+运行协调员通过 `POST /gates` 登记闸门。服务校验标识、名称、最大开度和初始开度，写入空闲状态；重复标识返回稳定冲突错误，不覆盖原记录。可选的 `adjustment_window`（秒）与 `max_window_adjustment` 成对配置该闸门值班周期的累计开度调整窗口；只给其一时返回稳定非法输入错误。
 
 ### request-gate-command
 
-运行协调员通过 `POST /commands` 提交开度调整命令。服务读取闸门当前开度和限制，校验目标开度与申请信息，创建待复核命令并冻结起始开度。
+运行协调员通过 `POST /commands` 提交开度调整命令。服务读取闸门当前开度和限制，校验目标开度与申请信息，在同一临界区内按已生效执行事实计算调整窗口，创建待复核命令并冻结起始开度。窗口累计调整量加上本次结构行程 `|target - starting|` 超过安全上限时，返回稳定冲突 `adjustment_window_exceeded`，不创建命令、不占用闸门。
 
 ### review-safety-interlock
 
-安全复核员通过 `POST /commands/{id}/interlock` 提交复核结论。clear 结论会原子占用闸门并签发一次执行令牌；blocked 结论会把命令置为 rejected。其他命令先占用同一闸门时，当前 clear 结论返回冲突且不改变闸门。
+安全复核员通过 `POST /commands/{id}/interlock` 提交复核结论。clear 结论会在占用闸门前重新按当时已生效执行事实校验调整窗口，然后原子占用闸门并签发一次执行令牌；若窗口已满，返回 `adjustment_window_exceeded` 且命令保持 pending、版本不变、不签发令牌、不占用闸门。blocked 结论是安全拒绝、不构成有效调整，会把命令置为 rejected 且不受窗口限制。其他命令先占用同一闸门时，当前 clear 结论返回冲突且不改变闸门。
 
 ### execute-gate-command
 
@@ -44,6 +44,10 @@
 - blocked 复核使命令 rejected，不会占用闸门。
 - 模拟故障会令命令 aborted、闸门 faulted，并保留最终开度。
 - 已完成或已中止的命令不能再次执行。
+- 调整窗口只按已生效执行事实累计：completed 命令在完成时刻计入 `|target - starting|`；pending、approved、executing 和 aborted 均不占用预算。
+- 窗口随时间滑动释放：事实在完成后经过一个窗口时长自动滑出，`GET /gates/{id}/adjustment-window` 说明已用量、剩余量、窗口内事实明细和下一条释放时刻。
+- 窗口检查在申请创建和 clear 复核两个检查点都于仓库写锁内基于已提交事实完成，竞态下不会超额放行；恰好等于上限为合法边界。
+- 窗口拒绝不写入命令或闸门状态：不创建占用、不签发凭据、不推进版本。
 
 ## 模块边界
 
@@ -60,6 +64,7 @@
 - `GET /health`
 - `POST /gates`
 - `GET /gates/{id}`
+- `GET /gates/{id}/adjustment-window`
 - `POST /commands`
 - `GET /commands/{id}`
 - `POST /commands/{id}/interlock`

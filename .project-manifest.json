@@ -124,6 +124,28 @@
         "storage",
         "contracts"
       ]
+    },
+    {
+      "id": "adjustment-window",
+      "name": "Cumulative aperture adjustment window",
+      "entry": "POST /commands and POST /commands/{id}/interlock; GET /gates/{id}/adjustment-window",
+      "steps": [
+        "configure a per-gate sliding window and a cumulative adjustment safety limit at registration",
+        "project the window from completed execution facts under the repository write lock",
+        "refuse a new request or a clear review when its structural travel would push the window over the limit",
+        "release facts as they age out and expose the explainable budget, boundary and release time"
+      ],
+      "success": "requests and clear reviews at or below the limit are admitted; used adjustment, remaining budget and per-command facts stay readable",
+      "failure": "returns adjustment_window_exceeded without creating a command, reserving the gate, issuing a token or advancing a version; blocked reviews remain allowed; concurrent admission cannot over-admit",
+      "verification": "workflowcheck drives a window to its exact boundary, proves refusal side effects, proves real time-based release, and repeats request/review vs execution races",
+      "module_ids": [
+        "entrypoint",
+        "httpapi",
+        "coordination",
+        "domain",
+        "storage",
+        "contracts"
+      ]
     }
   ],
   "complexity": {

@@ -18,17 +18,25 @@ const (
 var gateIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,31}$`)
 
 type Gate struct {
-	ID              string
-	Name            string
-	Status          GateStatus
-	Aperture        float64
-	MaxAperture     float64
-	ActiveCommandID string
-	UpdatedAt       time.Time
-	Version         int64
+	ID                  string
+	Name                string
+	Status              GateStatus
+	Aperture            float64
+	MaxAperture         float64
+	ActiveCommandID     string
+	AdjustmentWindow    time.Duration
+	MaxWindowAdjustment float64
+	UpdatedAt           time.Time
+	Version             int64
 }
 
-func NewGate(id, name string, maxAperture, initialAperture float64, now time.Time) (Gate, error) {
+func NewGate(
+	id, name string,
+	maxAperture, initialAperture float64,
+	adjustmentWindow time.Duration,
+	maxWindowAdjustment float64,
+	now time.Time,
+) (Gate, error) {
 	id = strings.TrimSpace(id)
 	if !gateIDPattern.MatchString(id) {
 		return Gate{}, Invalid("invalid_gate_id", "gate id must use lowercase letters, digits, and hyphens")
@@ -45,14 +53,30 @@ func NewGate(id, name string, maxAperture, initialAperture float64, now time.Tim
 		return Gate{}, Invalid("invalid_initial_aperture", "initial aperture must be within the gate limit")
 	}
 
+	windowEnabled := adjustmentWindow > 0 || maxWindowAdjustment > 0
+	if adjustmentWindow < 0 {
+		return Gate{}, Invalid("invalid_adjustment_window", "adjustment window must be greater than zero")
+	}
+	if maxWindowAdjustment < 0 {
+		return Gate{}, Invalid("invalid_max_window_adjustment", "max window adjustment must be greater than zero")
+	}
+	if windowEnabled && (adjustmentWindow <= 0 || maxWindowAdjustment <= 0) {
+		return Gate{}, Invalid(
+			"invalid_adjustment_window",
+			"adjustment_window and max_window_adjustment must be provided together",
+		)
+	}
+
 	return Gate{
-		ID:          id,
-		Name:        name,
-		Status:      GateIdle,
-		Aperture:    initialAperture,
-		MaxAperture: maxAperture,
-		UpdatedAt:   now.UTC(),
-		Version:     1,
+		ID:                  id,
+		Name:                name,
+		Status:              GateIdle,
+		Aperture:            initialAperture,
+		MaxAperture:         maxAperture,
+		AdjustmentWindow:    adjustmentWindow,
+		MaxWindowAdjustment: maxWindowAdjustment,
+		UpdatedAt:           now.UTC(),
+		Version:             1,
 	}, nil
 }
 

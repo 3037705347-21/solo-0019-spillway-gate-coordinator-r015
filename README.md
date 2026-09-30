@@ -16,6 +16,7 @@ go run ./cmd/server --addr 127.0.0.1:18119
 ```text
 POST /gates
 GET  /gates/{id}
+GET  /gates/{id}/adjustment-window
 POST /commands
 GET  /commands/{id}
 POST /commands/{id}/interlock
@@ -29,9 +30,13 @@ POST /commands/{id}/execute
   "id": "gate-east",
   "name": "东侧泄洪闸",
   "max_aperture": 4.5,
-  "initial_aperture": 0.5
+  "initial_aperture": 0.5,
+  "adjustment_window": 3600,
+  "max_window_adjustment": 3.0
 }
 ```
+
+`adjustment_window`（秒）与 `max_window_adjustment` 可选且必须成对出现；缺省时该闸门不启用值班周期累计窗口。窗口只按**已生效执行事实**（completed 命令在完成时刻）累计每条命令的结构行程 `|target - starting|`，随时间滑动释放。新申请和 clear 复核在窗口内累计超过上限时返回冲突 `adjustment_window_exceeded`；blocked 复核、pending/approved 命令和 aborted 故障都不占用预算。`GET /gates/{id}/adjustment-window` 返回已用量、剩余量、窗口内事实明细与下一条真实释放时刻。
 
 提交命令示例：
 
@@ -82,6 +87,7 @@ go run ./cmd/workflowcheck --workflow register-gate
 go run ./cmd/workflowcheck --workflow request-gate-command
 go run ./cmd/workflowcheck --workflow review-safety-interlock
 go run ./cmd/workflowcheck --workflow execute-gate-command
+go run ./cmd/workflowcheck --workflow adjustment-window
 ```
 
 这些检查会创建临时 HTTP 服务并调用真实路由。它们不调用外部网络，也不依赖数据库。
